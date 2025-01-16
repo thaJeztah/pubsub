@@ -5,34 +5,34 @@ import (
 	"time"
 )
 
-var wgPool = sync.Pool{New: func() interface{} { return new(sync.WaitGroup) }}
+var wgPool = sync.Pool{New: func() any { return new(sync.WaitGroup) }}
 
 // NewPublisher creates a new pub/sub publisher to broadcast messages.
 // The duration is used as the send timeout as to not block the publisher publishing
 // messages to other clients if one client is slow or unresponsive.
 // The buffer is used when creating new channels for subscribers.
-func NewPublisher(publishTimeout time.Duration, buffer int) *Publisher {
-	return &Publisher{
+func NewPublisher[T any](publishTimeout time.Duration, buffer int) *Publisher[T] {
+	return &Publisher[T]{
 		buffer:      buffer,
 		timeout:     publishTimeout,
-		subscribers: make(map[subscriber]topicFunc),
+		subscribers: make(map[subscriber[T]]topicFunc[T]),
 	}
 }
 
-type subscriber chan interface{}
-type topicFunc func(v interface{}) bool
+type subscriber[T any] chan T
+type topicFunc[T any] func(v T) bool
 
 // Publisher is basic pub/sub structure. Allows to send events and subscribe
 // to them. Can be safely used from multiple goroutines.
-type Publisher struct {
+type Publisher[T any] struct {
 	m           sync.RWMutex
 	buffer      int
 	timeout     time.Duration
-	subscribers map[subscriber]topicFunc
+	subscribers map[subscriber[T]]topicFunc[T]
 }
 
 // Len returns the number of subscribers for the publisher
-func (p *Publisher) Len() int {
+func (p *Publisher[T]) Len() int {
 	p.m.RLock()
 	i := len(p.subscribers)
 	p.m.RUnlock()
@@ -40,13 +40,13 @@ func (p *Publisher) Len() int {
 }
 
 // Subscribe adds a new subscriber to the publisher returning the channel.
-func (p *Publisher) Subscribe() chan interface{} {
+func (p *Publisher[T]) Subscribe() chan T {
 	return p.SubscribeTopic(nil)
 }
 
 // SubscribeTopic adds a new subscriber that filters messages sent by a topic.
-func (p *Publisher) SubscribeTopic(topic topicFunc) chan interface{} {
-	ch := make(chan interface{}, p.buffer)
+func (p *Publisher[T]) SubscribeTopic(topic topicFunc[T]) chan T {
+	ch := make(chan T, p.buffer)
 	p.m.Lock()
 	p.subscribers[ch] = topic
 	p.m.Unlock()
@@ -55,8 +55,8 @@ func (p *Publisher) SubscribeTopic(topic topicFunc) chan interface{} {
 
 // SubscribeTopicWithBuffer adds a new subscriber that filters messages sent by a topic.
 // The returned channel has a buffer of the specified size.
-func (p *Publisher) SubscribeTopicWithBuffer(topic topicFunc, buffer int) chan interface{} {
-	ch := make(chan interface{}, buffer)
+func (p *Publisher[T]) SubscribeTopicWithBuffer(topic topicFunc[T], buffer int) chan T {
+	ch := make(chan T, buffer)
 	p.m.Lock()
 	p.subscribers[ch] = topic
 	p.m.Unlock()
@@ -64,7 +64,7 @@ func (p *Publisher) SubscribeTopicWithBuffer(topic topicFunc, buffer int) chan i
 }
 
 // Evict removes the specified subscriber from receiving any more messages.
-func (p *Publisher) Evict(sub chan interface{}) {
+func (p *Publisher[T]) Evict(sub chan T) {
 	p.m.Lock()
 	_, exists := p.subscribers[sub]
 	if exists {
@@ -75,7 +75,7 @@ func (p *Publisher) Evict(sub chan interface{}) {
 }
 
 // Publish sends the data in v to all subscribers currently registered with the publisher.
-func (p *Publisher) Publish(v interface{}) {
+func (p *Publisher[T]) Publish(v T) {
 	p.m.RLock()
 	if len(p.subscribers) == 0 {
 		p.m.RUnlock()
@@ -93,7 +93,7 @@ func (p *Publisher) Publish(v interface{}) {
 }
 
 // Close closes the channels to all subscribers registered with the publisher.
-func (p *Publisher) Close() {
+func (p *Publisher[T]) Close() {
 	p.m.Lock()
 	for sub := range p.subscribers {
 		delete(p.subscribers, sub)
@@ -102,7 +102,7 @@ func (p *Publisher) Close() {
 	p.m.Unlock()
 }
 
-func (p *Publisher) sendTopic(sub subscriber, topic topicFunc, v interface{}, wg *sync.WaitGroup) {
+func (p *Publisher[T]) sendTopic(sub subscriber[T], topic topicFunc[T], v T, wg *sync.WaitGroup) {
 	defer wg.Done()
 	if topic != nil && !topic(v) {
 		return

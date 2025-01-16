@@ -7,34 +7,49 @@ import (
 )
 
 func TestSendToOneSub(t *testing.T) {
-	p := NewPublisher(100*time.Millisecond, 10)
+	p := NewPublisher[string](100*time.Millisecond, 10)
 	c := p.Subscribe()
 
 	p.Publish("hi")
 
 	msg := <-c
-	if msg.(string) != "hi" {
+	if msg != "hi" {
 		t.Fatalf("expected message hi but received %v", msg)
 	}
 }
 
 func TestSendToMultipleSubs(t *testing.T) {
-	p := NewPublisher(100*time.Millisecond, 10)
-	var subs []chan interface{}
+	p := NewPublisher[string](100*time.Millisecond, 10)
+	var subs []chan string
 	subs = append(subs, p.Subscribe(), p.Subscribe(), p.Subscribe())
 
 	p.Publish("hi")
 
 	for _, c := range subs {
 		msg := <-c
-		if msg.(string) != "hi" {
+		if msg != "hi" {
 			t.Fatalf("expected message hi but received %v", msg)
 		}
 	}
 }
 
+func TestSendToMultipleSubsInt(t *testing.T) {
+	p := NewPublisher[int](100*time.Millisecond, 10)
+	var subs []chan int
+	subs = append(subs, p.Subscribe(), p.Subscribe(), p.Subscribe())
+
+	p.Publish(123)
+
+	for _, c := range subs {
+		msg := <-c
+		if msg != 123 {
+			t.Fatalf("expected message 123 but received %v", msg)
+		}
+	}
+}
+
 func TestEvictOneSub(t *testing.T) {
-	p := NewPublisher(100*time.Millisecond, 10)
+	p := NewPublisher[string](100*time.Millisecond, 10)
 	s1 := p.Subscribe()
 	s2 := p.Subscribe()
 
@@ -45,14 +60,14 @@ func TestEvictOneSub(t *testing.T) {
 	}
 
 	msg := <-s2
-	if msg.(string) != "hi" {
+	if msg != "hi" {
 		t.Fatalf("expected message hi but received %v", msg)
 	}
 }
 
 func TestClosePublisher(t *testing.T) {
-	p := NewPublisher(100*time.Millisecond, 10)
-	var subs []chan interface{}
+	p := NewPublisher[string](100*time.Millisecond, 10)
+	var subs []chan string
 	subs = append(subs, p.Subscribe(), p.Subscribe(), p.Subscribe())
 	p.Close()
 
@@ -65,29 +80,24 @@ func TestClosePublisher(t *testing.T) {
 
 const sampleText = "test"
 
-type testSubscriber struct {
-	dataCh chan interface{}
+type testSubscriber[T any] struct {
+	dataCh chan T
 	ch     chan error
 }
 
-func (s *testSubscriber) Wait() error {
+func (s *testSubscriber[T]) Wait() error {
 	return <-s.ch
 }
 
-func newTestSubscriber(p *Publisher) *testSubscriber {
-	ts := &testSubscriber{
+func newTestSubscriber(p *Publisher[string]) *testSubscriber[string] {
+	ts := &testSubscriber[string]{
 		dataCh: p.Subscribe(),
 		ch:     make(chan error),
 	}
 	go func() {
 		for data := range ts.dataCh {
-			s, ok := data.(string)
-			if !ok {
-				ts.ch <- fmt.Errorf("Unexpected type %T", data)
-				break
-			}
-			if s != sampleText {
-				ts.ch <- fmt.Errorf("Unexpected text %s", s)
+			if data != sampleText {
+				ts.ch <- fmt.Errorf("unexpected text %s", data)
 				break
 			}
 		}
@@ -98,8 +108,8 @@ func newTestSubscriber(p *Publisher) *testSubscriber {
 
 // for testing with -race
 func TestPubSubRace(t *testing.T) {
-	p := NewPublisher(0, 1024)
-	var subs []*testSubscriber
+	p := NewPublisher[string](0, 1024)
+	var subs []*testSubscriber[string]
 	for j := 0; j < 50; j++ {
 		subs = append(subs, newTestSubscriber(p))
 	}
@@ -117,10 +127,11 @@ func TestPubSubRace(t *testing.T) {
 }
 
 func BenchmarkPubSub(b *testing.B) {
+	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()
-		p := NewPublisher(0, 1024)
-		var subs []*testSubscriber
+		p := NewPublisher[string](0, 1024)
+		var subs []*testSubscriber[string]
 		for j := 0; j < 50; j++ {
 			subs = append(subs, newTestSubscriber(p))
 		}
