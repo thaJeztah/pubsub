@@ -10,57 +10,84 @@ import (
 
 func TestSendToOneSub(t *testing.T) {
 	p := pubsub.NewPublisher(100*time.Millisecond, 10)
+	t.Cleanup(p.Close)
 	c := p.Subscribe()
 
 	p.Publish("hi")
 
-	msg := <-c
-	if msg.(string) != "hi" {
-		t.Fatalf("expected message hi but received %v", msg)
+	select {
+	case msg := <-c:
+		if msg.(string) != "hi" {
+			t.Fatalf("expected message hi but received %v", msg)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for message")
 	}
 }
 
 func TestSendToMultipleSubs(t *testing.T) {
 	p := pubsub.NewPublisher(100*time.Millisecond, 10)
-	var subs []chan any
-	subs = append(subs, p.Subscribe(), p.Subscribe(), p.Subscribe())
+	t.Cleanup(p.Close)
+
+	subs := []chan any{p.Subscribe(), p.Subscribe(), p.Subscribe()}
 
 	p.Publish("hi")
 
 	for _, c := range subs {
-		msg := <-c
-		if msg.(string) != "hi" {
-			t.Fatalf("expected message hi but received %v", msg)
+		select {
+		case msg := <-c:
+			if msg.(string) != "hi" {
+				t.Fatalf("expected message hi but received %v", msg)
+			}
+		case <-time.After(1 * time.Second):
+			t.Fatal("timed out waiting for message")
 		}
 	}
 }
 
 func TestEvictOneSub(t *testing.T) {
 	p := pubsub.NewPublisher(100*time.Millisecond, 10)
+	t.Cleanup(p.Close)
+
 	s1 := p.Subscribe()
 	s2 := p.Subscribe()
 
 	p.Evict(s1)
 	p.Publish("hi")
-	if _, ok := <-s1; ok {
-		t.Fatal("expected s1 to not receive the published message")
+
+	select {
+	case _, ok := <-s1:
+		if ok {
+			t.Fatal("expected s1 to be closed after eviction")
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for s1 to close after eviction")
 	}
 
-	msg := <-s2
-	if msg.(string) != "hi" {
-		t.Fatalf("expected message hi but received %v", msg)
+	select {
+	case msg := <-s2:
+		if msg.(string) != "hi" {
+			t.Fatalf("expected message hi but received %v", msg)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for s2 to receive message")
 	}
 }
 
 func TestClosePublisher(t *testing.T) {
 	p := pubsub.NewPublisher(100*time.Millisecond, 10)
-	var subs []chan any
-	subs = append(subs, p.Subscribe(), p.Subscribe(), p.Subscribe())
+	subs := []chan any{p.Subscribe(), p.Subscribe(), p.Subscribe()}
+
 	p.Close()
 
 	for _, c := range subs {
-		if _, ok := <-c; ok {
-			t.Fatal("expected all subscriber channels to be closed")
+		select {
+		case _, ok := <-c:
+			if ok {
+				t.Fatal("expected all subscriber channels to be closed")
+			}
+		case <-time.After(1 * time.Second):
+			t.Fatal("timed out waiting for subscriber channel to close")
 		}
 	}
 }
@@ -79,21 +106,22 @@ func (s *testSubscriber) Wait() error {
 func newTestSubscriber(p *pubsub.Publisher) *testSubscriber {
 	ts := &testSubscriber{
 		dataCh: p.Subscribe(),
-		ch:     make(chan error),
+		ch:     make(chan error, 1), // prevent deadlock if we produce an error before Wait()
 	}
 	go func() {
+		defer close(ts.ch)
 		for data := range ts.dataCh {
 			s, ok := data.(string)
 			if !ok {
-				ts.ch <- fmt.Errorf("Unexpected type %T", data)
-				break
+				ts.ch <- fmt.Errorf("unexpected type %T", data)
+				return
 			}
 			if s != sampleText {
-				ts.ch <- fmt.Errorf("Unexpected text %s", s)
-				break
+				ts.ch <- fmt.Errorf("unexpected text %q", s)
+				return
 			}
 		}
-		close(ts.ch)
+		ts.ch <- nil
 	}()
 	return ts
 }
@@ -101,20 +129,32 @@ func newTestSubscriber(p *pubsub.Publisher) *testSubscriber {
 // for testing with -race
 func TestPubSubRace(t *testing.T) {
 	p := pubsub.NewPublisher(0, 1024)
-	var subs []*testSubscriber
+	t.Cleanup(p.Close)
+
+	subs := make([]*testSubscriber, 0, 50)
 	for j := 0; j < 50; j++ {
 		subs = append(subs, newTestSubscriber(p))
 	}
-	for j := 0; j < 1000; j++ {
-		p.Publish(sampleText)
-	}
-	time.AfterFunc(1*time.Second, func() {
-		for _, s := range subs {
-			p.Evict(s.dataCh)
+
+	done := make(chan struct{})
+	go func() {
+		for j := 0; j < 1000; j++ {
+			p.Publish(sampleText)
 		}
-	})
+		close(done)
+	}()
+
+	// Evict while publishes are running.
 	for _, s := range subs {
-		_ = s.Wait()
+		p.Evict(s.dataCh)
+	}
+
+	<-done
+
+	for _, s := range subs {
+		if err := s.Wait(); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
