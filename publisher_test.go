@@ -1,13 +1,15 @@
-package pubsub
+package pubsub_test
 
 import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/moby/pubsub"
 )
 
 func TestSendToOneSub(t *testing.T) {
-	p := NewPublisher(100*time.Millisecond, 10)
+	p := pubsub.NewPublisher(100*time.Millisecond, 10)
 	c := p.Subscribe()
 
 	p.Publish("hi")
@@ -19,7 +21,7 @@ func TestSendToOneSub(t *testing.T) {
 }
 
 func TestSendToMultipleSubs(t *testing.T) {
-	p := NewPublisher(100*time.Millisecond, 10)
+	p := pubsub.NewPublisher(100*time.Millisecond, 10)
 	var subs []chan any
 	subs = append(subs, p.Subscribe(), p.Subscribe(), p.Subscribe())
 
@@ -34,7 +36,7 @@ func TestSendToMultipleSubs(t *testing.T) {
 }
 
 func TestEvictOneSub(t *testing.T) {
-	p := NewPublisher(100*time.Millisecond, 10)
+	p := pubsub.NewPublisher(100*time.Millisecond, 10)
 	s1 := p.Subscribe()
 	s2 := p.Subscribe()
 
@@ -51,7 +53,7 @@ func TestEvictOneSub(t *testing.T) {
 }
 
 func TestClosePublisher(t *testing.T) {
-	p := NewPublisher(100*time.Millisecond, 10)
+	p := pubsub.NewPublisher(100*time.Millisecond, 10)
 	var subs []chan any
 	subs = append(subs, p.Subscribe(), p.Subscribe(), p.Subscribe())
 	p.Close()
@@ -74,7 +76,7 @@ func (s *testSubscriber) Wait() error {
 	return <-s.ch
 }
 
-func newTestSubscriber(p *Publisher) *testSubscriber {
+func newTestSubscriber(p *pubsub.Publisher) *testSubscriber {
 	ts := &testSubscriber{
 		dataCh: p.Subscribe(),
 		ch:     make(chan error),
@@ -98,7 +100,7 @@ func newTestSubscriber(p *Publisher) *testSubscriber {
 
 // for testing with -race
 func TestPubSubRace(t *testing.T) {
-	p := NewPublisher(0, 1024)
+	p := pubsub.NewPublisher(0, 1024)
 	var subs []*testSubscriber
 	for j := 0; j < 50; j++ {
 		subs = append(subs, newTestSubscriber(p))
@@ -119,7 +121,7 @@ func TestPubSubRace(t *testing.T) {
 func BenchmarkPubSub(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()
-		p := NewPublisher(0, 1024)
+		p := pubsub.NewPublisher(0, 1024)
 		var subs []*testSubscriber
 		for j := 0; j < 50; j++ {
 			subs = append(subs, newTestSubscriber(p))
