@@ -157,28 +157,3 @@ func TestPubSubRace(t *testing.T) {
 		}
 	}
 }
-
-func BenchmarkPubSub(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		b.StopTimer()
-		p := pubsub.NewPublisher(0, 1024)
-		var subs []*testSubscriber
-		for j := 0; j < 50; j++ {
-			subs = append(subs, newTestSubscriber(p))
-		}
-		b.StartTimer()
-		for j := 0; j < 1000; j++ {
-			p.Publish(sampleText)
-		}
-		time.AfterFunc(1*time.Second, func() {
-			for _, s := range subs {
-				p.Evict(s.dataCh)
-			}
-		})
-		for _, s := range subs {
-			if err := s.Wait(); err != nil {
-				b.Fatal(err)
-			}
-		}
-	}
-}
