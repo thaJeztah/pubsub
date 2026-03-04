@@ -82,14 +82,26 @@ func (p *Publisher) Publish(v interface{}) {
 		return
 	}
 
+	var t *time.Timer
+	var done chan struct{}
+	if p.timeout > 0 {
+		done = make(chan struct{})
+		t = time.AfterFunc(p.timeout, func() {
+			close(done) // cancel all goroutines
+		})
+	}
+
 	wg := wgPool.Get().(*sync.WaitGroup)
 	for sub, topic := range p.subscribers {
 		wg.Add(1)
-		go p.sendTopic(sub, topic, v, wg)
+		go sendTopic(sub, topic, v, done, wg)
 	}
 	wg.Wait()
-	wgPool.Put(wg)
 	p.m.RUnlock()
+	wgPool.Put(wg)
+	if t != nil {
+		t.Stop()
+	}
 }
 
 // Close closes the channels to all subscribers registered with the publisher.
@@ -102,20 +114,16 @@ func (p *Publisher) Close() {
 	p.m.Unlock()
 }
 
-func (p *Publisher) sendTopic(sub subscriber, topic topicFunc, v interface{}, wg *sync.WaitGroup) {
+func sendTopic(sub subscriber, topic topicFunc, v interface{}, done <-chan struct{}, wg *sync.WaitGroup) {
 	defer wg.Done()
 	if topic != nil && !topic(v) {
 		return
 	}
 
-	// send under a select as to not block if the receiver is unavailable
-	if p.timeout > 0 {
-		timeout := time.NewTimer(p.timeout)
-		defer timeout.Stop()
-
+	if done != nil {
 		select {
 		case sub <- v:
-		case <-timeout.C:
+		case <-done:
 		}
 		return
 	}
