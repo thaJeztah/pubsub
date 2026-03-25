@@ -8,18 +8,17 @@ jobs:
   linters:
     strategy:
       matrix:
-        go-version: [1.19.x]
+        go-version: [1.19.x, oldstable, stable]
         os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
-      - uses: actions/setup-go@v3
+      - uses: actions/setup-go@v6.3.0
         with:
           go-version: ${{ matrix.go-version }}
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v6.0.2
       - name: lint
-        uses: golangci/golangci-lint-action@v3
+        uses: golangci/golangci-lint-action@v9.2.0
         with:
-          version: v1.49
           # TODO use --out-format=junit-xml and store artifacts
           args: --print-resources-usage --timeout=10m --verbose

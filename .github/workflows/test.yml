@@ -8,14 +8,14 @@ jobs:
   test:
     strategy:
       matrix:
-        go-version: [1.18.x, 1.19.x]
+        go-version: [1.18.x, 1.19.x, oldstable, stable]
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
-      - uses: actions/setup-go@v3
+      - uses: actions/setup-go@v6.3.0
         with:
           go-version: ${{ matrix.go-version }}
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v6.0.2
       - name: Test
         run: go test -v ./...
